@@ -48,9 +48,9 @@ class Djebel_App_Plugin_Markdown {
             return $content;
         }
 
-        $content = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.pre_process', $content, $ctx );
+        $content = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.pre_process_content', $content, $ctx );
         $markdown_content = $this->parser->text($content);
-        $markdown_content = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.post_process', $markdown_content, $ctx );
+        $markdown_content = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.post_process_content', $markdown_content, $ctx );
 
         return $markdown_content;
     }
