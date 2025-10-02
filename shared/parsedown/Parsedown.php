@@ -1,7 +1,5 @@
 <?php
 
-#
-#
 # Parsedown
 # http://parsedown.org
 #
@@ -13,7 +11,7 @@
 #
 #
 
-class Parsedown
+class Djebel_Plugin_Markdown_Shared_Parsedown
 {
     # ~
 
