@@ -75,8 +75,7 @@ class Djebel_App_Plugin_Markdown {
         $buffer_size = 512;
         $small_content = substr($content, 0, $buffer_size);
 
-        // Remove leading whitespace/dashes
-        $small_content = ltrim($small_content, " \t\n\r\0\x0B-");
+        $small_content = Dj_App_String_Util::trim($small_content, '-');
 
         // Find closing ---
         $end_pos = strpos($small_content, '---');
