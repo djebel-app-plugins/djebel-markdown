@@ -71,60 +71,36 @@ class Djebel_App_Plugin_Markdown {
             return $data;
         }
 
-        // Split on --- delimiters
-        $parts = explode('---', $content, 3);
+        // Work with smaller buffer (frontmatter is typically small)
+        $buffer_size = 512;
+        $small_content = substr($content, 0, $buffer_size);
 
-        if (count($parts) < 3) {
+        // Remove leading whitespace/dashes
+        $small_content = ltrim($small_content, " \t\n\r\0\x0B-");
+
+        // Find closing ---
+        $end_pos = strpos($small_content, '---');
+
+        if ($end_pos === false) {
             return $data;
         }
 
-        // Parse frontmatter (between first and second ---)
-        $frontmatter_text = trim($parts[1]);
+        // Extract frontmatter text
+        $frontmatter_text = substr($small_content, 0, $end_pos);
+        $frontmatter_text = trim($frontmatter_text);
 
         if (empty($frontmatter_text)) {
             return $data;
         }
 
-        $lines = explode("\n", $frontmatter_text);
+        // Use existing utility to parse metadata
+        $meta_res = Dj_App_Util::extractMetaInfo($frontmatter_text);
 
-        foreach ($lines as $line) {
-            $line = trim($line);
-
-            if (empty($line)) {
-                continue;
-            }
-
-            $colon_pos = strpos($line, ':');
-
-            if ($colon_pos === false) {
-                continue;
-            }
-
-            $key = trim(substr($line, 0, $colon_pos));
-            $value = trim(substr($line, $colon_pos + 1));
-
-            if (empty($key)) {
-                continue;
-            }
-
-            // Handle array notation: [item1, item2, item3]
-            if (!empty($value) && $value[0] === '[' && substr($value, -1) === ']') {
-                $array_content = substr($value, 1, -1);
-                $items = explode(',', $array_content);
-                $items = Dj_App_String_Util::trim($items);
-                $parsed_items = [];
-
-                foreach ($items as $item) {
-                    if (!empty($item)) {
-                        $parsed_items[] = $item;
-                    }
-                }
-
-                $data[$key] = $parsed_items;
-            } else {
-                $data[$key] = $value;
-            }
+        if ($meta_res->isError()) {
+            return $data;
         }
+
+        $data = $meta_res->data();
 
         return $data;
     }
