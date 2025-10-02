@@ -18,7 +18,9 @@ license: gpl2
 */
 
 $obj = Djebel_App_Plugin_Markdown::getInstance();
-Dj_App_Hooks::addFilter('app.content.markdown', [ $obj, 'processMarkdown' ] );
+
+Dj_App_Hooks::addFilter('app.plugins.markdown.parse_markdown', [ $obj, 'processMarkdown' ] );
+Dj_App_Hooks::addFilter('app.plugins.markdown.parse_markdown_front_matter', [ $obj, 'parseFrontMatter' ] );
 
 class Djebel_App_Plugin_Markdown {
     private $parser = null;
@@ -51,6 +53,80 @@ class Djebel_App_Plugin_Markdown {
         $markdown_content = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.post_process', $markdown_content, $ctx );
 
         return $markdown_content;
+    }
+
+    /**
+     * Parses frontmatter from markdown content.
+     * Extracts metadata between --- delimiters and returns parsed data.
+     *
+     * @param string $content Full markdown content with frontmatter
+     * @param array $ctx Context information
+     * @return array Parsed frontmatter data
+     */
+    public function parseFrontMatter($content, $ctx = [])
+    {
+        $data = [];
+
+        if (empty($content)) {
+            return $data;
+        }
+
+        // Split on --- delimiters
+        $parts = explode('---', $content, 3);
+
+        if (count($parts) < 3) {
+            return $data;
+        }
+
+        // Parse frontmatter (between first and second ---)
+        $frontmatter_text = trim($parts[1]);
+
+        if (empty($frontmatter_text)) {
+            return $data;
+        }
+
+        $lines = explode("\n", $frontmatter_text);
+
+        foreach ($lines as $line) {
+            $line = trim($line);
+
+            if (empty($line)) {
+                continue;
+            }
+
+            $colon_pos = strpos($line, ':');
+
+            if ($colon_pos === false) {
+                continue;
+            }
+
+            $key = trim(substr($line, 0, $colon_pos));
+            $value = trim(substr($line, $colon_pos + 1));
+
+            if (empty($key)) {
+                continue;
+            }
+
+            // Handle array notation: [item1, item2, item3]
+            if (!empty($value) && $value[0] === '[' && substr($value, -1) === ']') {
+                $array_content = substr($value, 1, -1);
+                $items = explode(',', $array_content);
+                $items = Dj_App_String_Util::trim($items);
+                $parsed_items = [];
+
+                foreach ($items as $item) {
+                    if (!empty($item)) {
+                        $parsed_items[] = $item;
+                    }
+                }
+
+                $data[$key] = $parsed_items;
+            } else {
+                $data[$key] = $value;
+            }
+        }
+
+        return $data;
     }
 
     /**
