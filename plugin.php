@@ -42,7 +42,16 @@ class Djebel_App_Plugin_Markdown {
                 $this->parser = new Djebel_Plugin_Markdown_Shared_Parsedown();
             }
 
+            // Prevents raw HTML in Markdown from being rendered
             $this->parser->setSafeMode(true);
+
+            // new lines to br
+            $this->parser->setBreaksEnabled(true);
+
+            // Escapes all raw HTML tags instead of rendering them.
+            $this->parser->setMarkupEscaped(true);
+
+            $this->parser = Dj_App_Hooks::applyFilter( 'app.plugin.markdown.parser_config', $this->parser );
         }
 
         if (empty($this->parser)) {
