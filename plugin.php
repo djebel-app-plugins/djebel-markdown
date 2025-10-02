@@ -24,6 +24,7 @@ Dj_App_Hooks::addFilter('app.plugins.markdown.parse_markdown_front_matter', [ $o
 
 class Djebel_App_Plugin_Markdown {
     private $parser = null;
+    private $buffer_size = 512;
 
     /**
      * @param string $content
@@ -46,6 +47,24 @@ class Djebel_App_Plugin_Markdown {
 
         if (empty($this->parser)) {
             return $content;
+        }
+
+        // Skip frontmatter if present
+        $buffer_size = $this->buffer_size;
+        $buffer_size = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.parse_front_matter_buff_size', $buffer_size, $ctx );
+
+        $small_content = substr($content, 0, $buffer_size);
+        $small_content = Dj_App_String_Util::trim($small_content, '-'); // trim the full content
+
+        // we're searching for the second ---
+        $end_str = '---';
+        $end_str_pos = strpos($small_content, $end_str);
+
+        if ($end_str_pos !== false) {
+            $content = Dj_App_String_Util::trim($content, '-'); // trim the full content
+            $offset = $end_str_pos + strlen($end_str);
+            $content = substr($content, $offset); // until end of time
+            $content = Dj_App_String_Util::trim($content, '-'); // could there be more dashes than 3 --- ?
         }
 
         $content = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.pre_process_content', $content, $ctx );
@@ -72,9 +91,9 @@ class Djebel_App_Plugin_Markdown {
         }
 
         // Work with smaller buffer (frontmatter is typically small)
-        $buffer_size = 512;
+        $buffer_size = $this->buffer_size;
+        $buffer_size = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.parse_front_matter_buff_size', $buffer_size, $ctx );
         $small_content = substr($content, 0, $buffer_size);
-
         $small_content = Dj_App_String_Util::trim($small_content, '-');
 
         // Find closing ---
@@ -86,7 +105,7 @@ class Djebel_App_Plugin_Markdown {
 
         // Extract frontmatter text
         $frontmatter_text = substr($small_content, 0, $end_pos);
-        $frontmatter_text = trim($frontmatter_text);
+        $frontmatter_text = Dj_App_String_Util::trim($frontmatter_text, '-'); // in case there are more -
 
         if (empty($frontmatter_text)) {
             return $data;
