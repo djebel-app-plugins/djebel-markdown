@@ -34,7 +34,7 @@ class Djebel_App_Plugin_Markdown {
         if (!class_exists('Djebel_Plugin_Markdown_Shared_Parsedown')) {
             if (class_exists('Parsedown')) {
                 $this->parser = new Parsedown(); // loaded by the user.
-            } else { // custom class prefixed
+            } else { // custom prefixed class
                 require_once __DIR__ . '/shared/parsedown/Parsedown.php';
                 $this->parser = new Djebel_Plugin_Markdown_Shared_Parsedown();
             }
