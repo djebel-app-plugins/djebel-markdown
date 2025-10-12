@@ -92,7 +92,7 @@ class Djebel_App_Plugin_Markdown {
     }
 
     /**
-     * Parses frontmatter from markdown content.
+     * Parses frontmatter from markdown content or reads from a file.
      * Extracts metadata between --- delimiters and returns parsed data.
      *
      * @param string $content Full markdown content with frontmatter
@@ -105,11 +105,35 @@ class Djebel_App_Plugin_Markdown {
 
         try {
             $content = Dj_App_String_Util::trim($content);
+            $buffer_size = $this->buffer_size;
+            $buffer_size = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.parse_front_matter_buff_size', $buffer_size, $ctx );
+            $read_full_content = empty($ctx['full']) ? false : $ctx['full'];
 
             if (empty($content)) {
-                throw new Dj_App_Exception('Empty content');
-            }
+                if (empty($ctx['file'])) {
+                    throw new Dj_App_Exception('Empty content');
+                }
 
+                if ($read_full_content) {
+                    $buffer_size = 5 * 1024 * 1024; // 5MB
+                }
+
+                $file = $ctx['file'];
+                $res_obj = Dj_App_File_Util::readPartially($file, $buffer_size);
+
+                if ($res_obj->isError()) {
+                    throw new Dj_App_Exception('Error reading file', [ 'file' => $file ]);
+                }
+
+                $content = $res_obj->output;
+                $content = Dj_App_String_Util::trim($content);
+
+                if (empty($content)) {
+                    throw new Dj_App_Exception('Empty content', [ 'file' => $file ]);
+                }
+            }
+            
+            $res_obj->content = $content;
             $first_char = Dj_App_String_Util::getFirstChar($content);
 
             // no header
@@ -117,8 +141,6 @@ class Djebel_App_Plugin_Markdown {
                 throw new Dj_App_Exception('Missing header');
             }
 
-            $buffer_size = $this->buffer_size;
-            $buffer_size = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.parse_front_matter_buff_size', $buffer_size, $ctx );
             $small_content = Dj_App_String_Util::cut($content, $buffer_size);
 
             // Find closing ---
@@ -134,6 +156,13 @@ class Djebel_App_Plugin_Markdown {
 
             if (empty($frontmatter_text)) {
                 return $res_obj;
+            }
+
+            // skip header
+            if ($read_full_content) {
+                $frontmatter_len = strlen($frontmatter_text);
+                $content = substr($content, $frontmatter_len);
+                $res_obj->content = $content;
             }
 
             // Use existing utility to parse metadata
