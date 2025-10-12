@@ -182,13 +182,17 @@ class Djebel_App_Plugin_Markdown {
             $meta = $meta_res->data();
             $meta = empty($meta) || !is_array($meta) ? [] : $meta;
 
-            // Use file modification time as fallback for publish_date
-            if (!empty($ctx['file']) && empty($meta['publish_date'])) {
-                $file = $ctx['file'];
-                $file_mtime = filemtime($file);
+            // Fallback for publish_date: creation_date -> file mtime
+            if (empty($meta['publish_date'])) {
+                if (!empty($meta['creation_date'])) {
+                    $meta['publish_date'] = $meta['creation_date'];
+                } elseif (!empty($ctx['file'])) {
+                    $file = $ctx['file'];
+                    $file_mtime = filemtime($file);
 
-                if ($file_mtime) {
-                    $meta['publish_date'] = date('Y-m-d H:i:s', $file_mtime);
+                    if ($file_mtime) {
+                        $meta['publish_date'] = date('Y-m-d H:i:s', $file_mtime);
+                    }
                 }
             }
 
