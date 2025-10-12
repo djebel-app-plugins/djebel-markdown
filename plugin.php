@@ -105,6 +105,9 @@ class Djebel_App_Plugin_Markdown {
         $res_obj = new Dj_App_Result();
 
         try {
+            $res_obj->meta = [];
+            $res_obj->content = '';
+
             $content = Dj_App_String_Util::trim($content);
             $buffer_size = $this->buffer_size;
             $buffer_size = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.parse_front_matter_buff_size', $buffer_size, $ctx );
@@ -177,6 +180,7 @@ class Djebel_App_Plugin_Markdown {
             }
 
             $meta = $meta_res->data();
+            $meta = empty($meta) || !is_array($meta) ? [] : $meta;
 
             // Use file modification time as fallback for publish_date
             if (!empty($ctx['file']) && empty($meta['publish_date'])) {
@@ -192,6 +196,11 @@ class Djebel_App_Plugin_Markdown {
             $res_obj->status(true);
         } catch (Exception $e) {
             $res_obj->msg = $e->getMessage();
+        }
+
+        // Ensure meta is always an array even on exception
+        if (!isset($res_obj->meta) || !is_array($res_obj->meta)) {
+            $res_obj->meta = [];
         }
 
         return $res_obj;
