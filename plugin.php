@@ -19,7 +19,7 @@ license: gpl2
 
 $obj = Djebel_App_Plugin_Markdown::getInstance();
 
-Dj_App_Hooks::addFilter('app.plugins.markdown.parse_markdown', [ $obj, 'processMarkdown' ] );
+Dj_App_Hooks::addFilter('app.plugins.markdown.convert_markdown', [ $obj, 'processMarkdown' ] );
 Dj_App_Hooks::addFilter('app.plugins.markdown.parse_front_matter', [ $obj, 'parseFrontMatter' ] );
 
 class Djebel_App_Plugin_Markdown {
