@@ -182,6 +182,33 @@ class Djebel_App_Plugin_Markdown {
             $meta = $meta_res->data();
             $meta = empty($meta) || !is_array($meta) ? [] : $meta;
 
+            // Set defaults for common fields
+            $defaults = [
+                'title' => '',
+                'summary' => '',
+                'creation_date' => '',
+                'last_modified' => '',
+                'publish_date' => '',
+                'sort_order' => 0,
+                'category' => '',
+                'tags' => [],
+                'author' => '',
+                'slug' => '',
+            ];
+
+            foreach ($defaults as $key => $default_value) {
+                if (empty($meta[$key])) {
+                    $meta[$key] = $default_value;
+                }
+            }
+
+            // Process tags: convert string to array
+            if (is_string($meta['tags'])) {
+                $meta['tags'] = explode(',', $meta['tags']);
+                $meta['tags'] = Dj_App_String_Util::trim($meta['tags']);
+                $meta['tags'] = array_filter($meta['tags']);
+            }
+
             // Fallback for publish_date: creation_date -> file mtime
             if (empty($meta['publish_date'])) {
                 if (!empty($meta['creation_date'])) {
