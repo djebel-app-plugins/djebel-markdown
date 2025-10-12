@@ -176,7 +176,19 @@ class Djebel_App_Plugin_Markdown {
                 return $res_obj;
             }
 
-            $res_obj->meta = $meta_res->data();
+            $meta = $meta_res->data();
+
+            // Use file modification time as fallback for publish_date
+            if (!empty($ctx['file']) && empty($meta['publish_date'])) {
+                $file = $ctx['file'];
+                $file_mtime = filemtime($file);
+
+                if ($file_mtime) {
+                    $meta['publish_date'] = date('Y-m-d H:i:s', $file_mtime);
+                }
+            }
+
+            $res_obj->meta = $meta;
             $res_obj->status(true);
         } catch (Exception $e) {
             $res_obj->msg = $e->getMessage();
