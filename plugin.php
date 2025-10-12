@@ -20,10 +20,14 @@ license: gpl2
 $obj = Djebel_App_Plugin_Markdown::getInstance();
 
 Dj_App_Hooks::addFilter('app.plugins.markdown.parse_markdown', [ $obj, 'processMarkdown' ] );
-Dj_App_Hooks::addFilter('app.plugins.markdown.parse_markdown_front_matter', [ $obj, 'parseFrontMatter' ] );
+Dj_App_Hooks::addFilter('app.plugins.markdown.parse_front_matter', [ $obj, 'parseFrontMatter' ] );
 
 class Djebel_App_Plugin_Markdown {
     private $parser = null;
+
+    /**
+     * @desc when we read the frontmatter/header of a markdown we read it partially.
+     */
     private $buffer_size = 512;
 
     /**
@@ -51,34 +55,38 @@ class Djebel_App_Plugin_Markdown {
             // Escapes all raw HTML tags instead of rendering them.
             $this->parser->setMarkupEscaped(true);
 
-            $this->parser = Dj_App_Hooks::applyFilter( 'app.plugin.markdown.parser_config', $this->parser );
+            $this->parser = Dj_App_Hooks::applyFilter( 'app.plugin.markdown.parser_init_obj', $this->parser, $ctx );
         }
 
         if (empty($this->parser)) {
             return $content;
         }
 
-        // Skip frontmatter if present
-        $buffer_size = $this->buffer_size;
-        $buffer_size = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.parse_front_matter_buff_size', $buffer_size, $ctx );
+        $content = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.pre_parse.content', $content, $ctx );
+        $content = Dj_App_String_Util::trim($content);
+        $first_char = Dj_App_String_Util::getFirstChar($content);
 
-        $small_content = substr($content, 0, $buffer_size);
-        $small_content = Dj_App_String_Util::trim($small_content, '-'); // trim the full content
+        // ? header Skip frontmatter if present to speed things up.
+        if ($first_char == '-') {
+            $content = Dj_App_String_Util::trim($content, '-'); // trim the first few chars so we can search for the second ---
 
-        // we're searching for the second ---
-        $end_str = '---';
-        $end_str_pos = strpos($small_content, $end_str);
+            // we're searching for the second ---
+            $end_str = '---';
+            $end_str_pos = strpos($content, $end_str);
 
-        if ($end_str_pos !== false) {
-            $content = Dj_App_String_Util::trim($content, '-'); // trim the full content
-            $offset = $end_str_pos + strlen($end_str);
-            $content = substr($content, $offset); // until end of time
-            $content = Dj_App_String_Util::trim($content, '-'); // could there be more dashes than 3 --- ?
+            if ($end_str_pos !== false) {
+                $offset = $end_str_pos + strlen($end_str);
+                $content = substr($content, $offset); // until end of time
+                $content = Dj_App_String_Util::trim($content, '-'); // could there be more dashes than 3 --- ?
+            }
         }
 
-        $content = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.pre_process_content', $content, $ctx );
-        $markdown_content = $this->parser->text($content);
-        $markdown_content = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.post_process_content', $markdown_content, $ctx );
+        $markdown_content = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.pre_process_content', $content, $ctx );
+
+        if (method_exists($this->parser, 'text')) { // jic
+            $markdown_content = $this->parser->text($markdown_content);
+            $markdown_content = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.post_process_content', $markdown_content, $ctx );
+        }
 
         return $markdown_content;
     }
@@ -89,47 +97,151 @@ class Djebel_App_Plugin_Markdown {
      *
      * @param string $content Full markdown content with frontmatter
      * @param array $ctx Context information
-     * @return array Parsed frontmatter data
+     * @return Dj_App_Result
      */
     public function parseFrontMatter($content, $ctx = [])
     {
-        $data = [];
+        $res_obj = new Dj_App_Result();
 
-        if (empty($content)) {
-            return $data;
+        try {
+            $content = Dj_App_String_Util::trim($content);
+
+            if (empty($content)) {
+                throw new Dj_App_Exception('Empty content');
+            }
+
+            $first_char = Dj_App_String_Util::getFirstChar($content);
+
+            // no header
+            if (empty($first_char) || $first_char != '-') {
+                throw new Dj_App_Exception('Missing header');
+            }
+
+            $buffer_size = $this->buffer_size;
+            $buffer_size = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.parse_front_matter_buff_size', $buffer_size, $ctx );
+            $small_content = Dj_App_String_Util::cut($content, $buffer_size);
+
+            // Find closing ---
+            $end_pos = strpos($small_content, '---');
+
+            if ($end_pos === false) {
+                throw new Dj_App_Exception('Missing closing ---');
+            }
+
+            // Extract frontmatter text
+            $frontmatter_text = substr($small_content, 0, $end_pos);
+            $frontmatter_text = Dj_App_String_Util::trim($frontmatter_text, '-'); // in case there are more -
+
+            if (empty($frontmatter_text)) {
+                return $res_obj;
+            }
+
+            // Use existing utility to parse metadata
+            $meta_res = Dj_App_Util::extractMetaInfo($frontmatter_text);
+
+            if ($meta_res->isError()) {
+                return $res_obj;
+            }
+
+            $res_obj->status(true);            
+        } catch (Exception $e) {
+            $res_obj->msg = $e->getMessage();
         }
 
-        // Work with smaller buffer (frontmatter is typically small)
-        $buffer_size = $this->buffer_size;
-        $buffer_size = Dj_App_Hooks::applyFilter( 'app.plugins.markdown.parse_front_matter_buff_size', $buffer_size, $ctx );
-        $small_content = substr($content, 0, $buffer_size);
-        $small_content = Dj_App_String_Util::trim($small_content, '-');
+        return $res_obj;
+    }
 
-        // Find closing ---
-        $end_pos = strpos($small_content, '---');
+    /**
+     * Parse markdown file: extract front matter, clean content, and handle title
+     * @param string $content Raw markdown file content
+     * @param array $ctx Context information
+     * @return Dj_App_Result Object with header, meta, and content fields
+     */
+    public function parseMarkdown($content, $ctx = [])
+    {
+        $res_obj = new Dj_App_Result();
 
-        if ($end_pos === false) {
-            return $data;
+        $delimiter_pos = strpos($content, "\n---\n");
+        $delimiter_len = 5;
+
+        if ($delimiter_pos === false) {
+            $delimiter_pos = strpos($content, "\n+++\n");
         }
 
-        // Extract frontmatter text
-        $frontmatter_text = substr($small_content, 0, $end_pos);
-        $frontmatter_text = Dj_App_String_Util::trim($frontmatter_text, '-'); // in case there are more -
-
-        if (empty($frontmatter_text)) {
-            return $data;
+        if ($delimiter_pos === false) {
+            $res_obj->header = '';
+            $res_obj->meta = [];
+            $res_obj->content = $content;
+            $res_obj->status(1);
+            return $res_obj;
         }
 
-        // Use existing utility to parse metadata
-        $meta_res = Dj_App_Util::extractMetaInfo($frontmatter_text);
+        $header = substr($content, 0, $delimiter_pos + $delimiter_len);
+        $meta_result = Dj_App_Util::extractMetaInfo($header);
 
-        if ($meta_res->isError()) {
-            return $data;
+        if ($meta_result->isError()) {
+            $meta = [];
+        } else {
+            $meta = $meta_result->data();
         }
 
-        $data = $meta_res->data();
+        $clean_start = $delimiter_pos + $delimiter_len;
+        $clean_content = substr($content, $clean_start);
 
-        return $data;
+        if (empty($meta['title'])) {
+            $content_len = strlen($clean_content);
+
+            if ($content_len > 0) {
+                $first_char = substr($clean_content, 0, 1);
+                $has_newline_hash = strpos($clean_content, "\n#");
+
+                if ($first_char === '#' || $has_newline_hash !== false) {
+                    $search_len = min(200, $content_len);
+                    $search_buffer = substr($clean_content, 0, $search_len);
+
+                    $hash_pos = strpos($search_buffer, "\n#");
+
+                    if ($hash_pos === false) {
+                        if ($first_char === '#') {
+                            $hash_pos = 0;
+                        }
+                    } else {
+                        $hash_pos++;
+                    }
+
+                    if ($hash_pos !== false) {
+                        $line_end = strpos($search_buffer, "\n", $hash_pos);
+
+                        if ($line_end === false) {
+                            $title_line = substr($search_buffer, $hash_pos);
+                            $line_end = strlen($search_buffer);
+                        } else {
+                            $line_len = $line_end - $hash_pos;
+                            $title_line = substr($search_buffer, $hash_pos, $line_len);
+                        }
+
+                        $hash_count = strspn($title_line, '#');
+
+                        if ($hash_count === 1) {
+                            $without_hash = substr($title_line, 1);
+                            $title = ltrim($without_hash);
+                            $meta['title'] = $title;
+
+                            $before = substr($clean_content, 0, $hash_pos);
+                            $after = substr($clean_content, $line_end);
+                            $clean_content = $before . $after;
+                        }
+                    }
+                }
+            }
+        }
+
+        $res_obj->header = $header;
+        $res_obj->meta = $meta;
+        $res_obj->content = $clean_content;
+        $res_obj->status(1);
+
+        return $res_obj;
     }
 
     /**
