@@ -30,6 +30,8 @@ class Djebel_App_Plugin_Markdown {
      */
     private $buffer_size = 512;
 
+    private $frontmatter_delimiter = '---';
+
     /**
      * @param string $content
      * @param array $ctx
@@ -71,11 +73,10 @@ class Djebel_App_Plugin_Markdown {
             $content = Dj_App_String_Util::trim($content, '-'); // trim the first few chars so we can search for the second ---
 
             // we're searching for the second ---
-            $end_str = '---';
-            $end_str_pos = strpos($content, $end_str);
+            $end_str_pos = strpos($content, $this->frontmatter_delimiter);
 
             if ($end_str_pos !== false) {
-                $offset = $end_str_pos + strlen($end_str);
+                $offset = $end_str_pos + strlen($this->frontmatter_delimiter);
                 $content = substr($content, $offset); // until end of time
                 $content = Dj_App_String_Util::trim($content, '-'); // could there be more dashes than 3 --- ?
             }
@@ -142,16 +143,17 @@ class Djebel_App_Plugin_Markdown {
             }
 
             $small_content = Dj_App_String_Util::cut($content, $buffer_size);
+            $small_content = Dj_App_String_Util::trim($small_content, '-');
 
             // Find closing ---
-            $end_pos = strpos($small_content, '---');
+            $closing_delimiter_pos = strpos($small_content, $this->frontmatter_delimiter);
 
-            if ($end_pos === false) {
+            if ($closing_delimiter_pos === false) {
                 throw new Dj_App_Exception('Missing closing ---');
             }
 
             // Extract frontmatter text
-            $frontmatter_text = substr($small_content, 0, $end_pos);
+            $frontmatter_text = substr($small_content, 0, $closing_delimiter_pos);
             $frontmatter_text = Dj_App_String_Util::trim($frontmatter_text, '-'); // in case there are more -
 
             if (empty($frontmatter_text)) {
@@ -160,9 +162,11 @@ class Djebel_App_Plugin_Markdown {
 
             // skip header
             if ($read_full_content) {
-                $frontmatter_len = strlen($frontmatter_text);
-                $content = substr($content, $frontmatter_len);
-                $res_obj->content = $content;
+                $content_trimmed = Dj_App_String_Util::trim($content, '-');
+                $offset = $closing_delimiter_pos + strlen($this->frontmatter_delimiter);
+                $remaining_content = substr($content_trimmed, $offset);
+                $remaining_content = Dj_App_String_Util::trim($remaining_content);
+                $res_obj->content = $remaining_content;
             }
 
             // Use existing utility to parse metadata
@@ -172,7 +176,8 @@ class Djebel_App_Plugin_Markdown {
                 return $res_obj;
             }
 
-            $res_obj->status(true);            
+            $res_obj->meta = $meta_res->data();
+            $res_obj->status(true);
         } catch (Exception $e) {
             $res_obj->msg = $e->getMessage();
         }
