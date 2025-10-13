@@ -202,6 +202,36 @@ class Djebel_App_Plugin_Markdown {
                 }
             }
 
+            // Title extraction: content h1 is source of truth
+            // If content starts with # Title, extract it to meta and remove from content
+            // This prevents duplication when rendering and ensures content title overrides frontmatter
+            if ($read_full_content && !empty($remaining_content) && $remaining_content[0] === '#') {
+                // Performance: check first char before cutting/normalizing (early exit for 99% of files)
+                $search_buffer = Dj_App_String_Util::cut($remaining_content, 150);
+                $search_buffer = Dj_App_String_Util::normalizeNewLines($search_buffer);
+
+                // Find end of first line
+                $newline_pos = strpos($search_buffer, "\n");
+                $title_line = ($newline_pos !== false) ? substr($search_buffer, 0, $newline_pos) : $search_buffer;
+
+                // Check if h1 (single # only)
+                if (strspn($title_line, '#') === 1) {
+                    // Extract and set title (trim removes # and whitespace)
+                    $meta['title'] = Dj_App_String_Util::trim($title_line, '#');
+
+                    // Remove from content (normalize full content only when needed)
+                    $line_end = ($newline_pos !== false) ? $newline_pos + 1 : strlen($search_buffer);
+                    $content_normalized = Dj_App_String_Util::normalizeNewLines($remaining_content);
+                    $remaining_content = substr($content_normalized, $line_end);
+                    $remaining_content = Dj_App_String_Util::trim($remaining_content);
+                    $res_obj->content = $remaining_content;
+
+                    $ctx['title_extracted_from_content'] = true;
+                }
+
+                $meta = Dj_App_Hooks::applyFilter('app.plugins.markdown.parse_front_matter_title', $meta, $ctx);
+            }
+
             // Process tags: convert string to array
             if (is_string($meta['tags'])) {
                 $meta['tags'] = explode(',', $meta['tags']);
