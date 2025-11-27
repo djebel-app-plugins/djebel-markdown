@@ -28,7 +28,7 @@ class Djebel_App_Plugin_Markdown {
     /**
      * @desc when we read the frontmatter/header of a markdown we read it partially.
      */
-    private $buffer_size = 512;
+    private $buffer_size = 2048;
 
     private $frontmatter_delimiter = '---';
 
