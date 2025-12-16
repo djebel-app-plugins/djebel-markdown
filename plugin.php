@@ -21,6 +21,7 @@ $obj = Djebel_App_Plugin_Markdown::getInstance();
 
 Dj_App_Hooks::addFilter('app.plugins.markdown.convert_markdown', [ $obj, 'processMarkdown' ] );
 Dj_App_Hooks::addFilter('app.plugins.markdown.parse_front_matter', [ $obj, 'parseFrontMatter' ] );
+Dj_App_Hooks::addFilter('app.page.content', [ $obj, 'filterPageContent' ], 10);
 
 class Djebel_App_Plugin_Markdown {
     private $parser = null;
@@ -90,6 +91,27 @@ class Djebel_App_Plugin_Markdown {
         }
 
         return $markdown_content;
+    }
+
+    /**
+     * Filter page content - convert markdown if ext is 'md'
+     * Hooks into app.page.content with high priority for early processing
+     *
+     * @param string $content
+     * @param array $ctx
+     * @return string
+     */
+    public function filterPageContent($content, $ctx = [])
+    {
+        $ext = empty($ctx['ext']) ? '' : $ctx['ext'];
+
+        if ($ext !== 'md') {
+            return $content;
+        }
+
+        $content = $this->processMarkdown($content, $ctx);
+
+        return $content;
     }
 
     /**
