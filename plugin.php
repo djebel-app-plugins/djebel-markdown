@@ -94,7 +94,7 @@ class Djebel_App_Plugin_Markdown {
     }
 
     /**
-     * Filter page content - convert markdown if ext is 'md'
+     * Filter page content - convert markdown if ext is 'md' or starts with ---
      * Hooks into app.page.content with high priority for early processing
      *
      * @param string $content
@@ -104,8 +104,14 @@ class Djebel_App_Plugin_Markdown {
     public function filterPageContent($content, $ctx = [])
     {
         $ext = empty($ctx['ext']) ? '' : $ctx['ext'];
+        $is_markdown = $ext === 'md';
 
-        if ($ext !== 'md') {
+        // Check for frontmatter delimiter (cheap 3-char check)
+        if (!$is_markdown && !empty($content) && substr($content, 0, 3) === '---') {
+            $is_markdown = true;
+        }
+
+        if (!$is_markdown) {
             return $content;
         }
 
