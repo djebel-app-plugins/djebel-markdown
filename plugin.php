@@ -106,9 +106,15 @@ class Djebel_App_Plugin_Markdown {
         $ext = empty($ctx['ext']) ? '' : $ctx['ext'];
         $is_markdown = $ext === 'md';
 
-        // Check for frontmatter delimiter (cheap 3-char check)
-        if (!$is_markdown && !empty($content) && substr($content, 0, 3) === '---') {
-            $is_markdown = true;
+        // Detect markdown by first char(s) - cheapest check first
+        if (!$is_markdown && !empty($content)) {
+            $first_char = $content[0];
+
+            if ($first_char === '-' && substr($content, 1, 2) === '--') {
+                $is_markdown = true;
+            } elseif ($first_char === '#') {
+                $is_markdown = true;
+            }
         }
 
         if (!$is_markdown) {
