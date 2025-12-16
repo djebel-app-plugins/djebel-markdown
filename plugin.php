@@ -103,13 +103,22 @@ class Djebel_App_Plugin_Markdown {
      */
     public function filterPageContent($content, $ctx = [])
     {
+        if (empty($content)) {
+            return $content;
+        }
+
+        $first_char = $content[0];
+
+        // HTML content - skip markdown processing
+        if ($first_char === '<') {
+            return $content;
+        }
+
         $ext = empty($ctx['ext']) ? '' : $ctx['ext'];
         $is_markdown = $ext === 'md';
 
-        // Detect markdown by first char(s) - cheapest check first
-        if (!$is_markdown && !empty($content)) {
-            $first_char = $content[0];
-
+        // Detect markdown by first char(s)
+        if (!$is_markdown) {
             if ($first_char === '-' && substr($content, 1, 2) === '--') {
                 $is_markdown = true;
             } elseif ($first_char === '#') {
