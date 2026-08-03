@@ -40,9 +40,14 @@ class Djebel_App_Plugin_Markdown {
      * @throws Exception
      */
     public function processMarkdown( $content, $ctx = [] ) {
-        // Load on demand
-        if (!class_exists('Djebel_Plugin_Markdown_Shared_Parsedown')) {
-            if (class_exists('Parsedown')) {
+        // Load on demand. Guarded on the parser itself, not on the class: every assignment
+        // below lives in this block, so keying it on class_exists() meant a pre-defined
+        // override class skipped the block entirely and left the parser null — which returns
+        // the content unconverted a few lines down.
+        if (empty($this->parser)) {
+            if (class_exists('Djebel_Plugin_Markdown_Shared_Parsedown')) {
+                $this->parser = new Djebel_Plugin_Markdown_Shared_Parsedown(); // pre-defined override
+            } elseif (class_exists('Parsedown')) {
                 $this->parser = new Parsedown(); // loaded by the user.
             } else { // custom prefixed class
                 require_once __DIR__ . '/shared/parsedown/Parsedown.php';
@@ -69,17 +74,28 @@ class Djebel_App_Plugin_Markdown {
         $content = Dj_App_String_Util::trim($content);
         $first_char = Dj_App_String_Util::getFirstChar($content);
 
-        // ? header Skip frontmatter if present to speed things up.
-        if ($first_char == '-') {
-            $content = Dj_App_String_Util::trim($content, '-'); // trim the first few chars so we can search for the second ---
+        // Skip the front matter block if present, to speed things up. It must OPEN with the
+        // delimiter at offset 0 — a bare leading '-' is a list bullet, and treating that as
+        // front matter discarded every line up to the next --- (a horizontal rule).
+        $delimiter_len = strlen($this->frontmatter_delimiter);
+        $opens_with_delimiter = strpos($content, $this->frontmatter_delimiter) === 0;
 
-            // we're searching for the second ---
-            $end_str_pos = strpos($content, $this->frontmatter_delimiter);
+        if ($first_char == '-' && $opens_with_delimiter) {
+            // Search for the CLOSING delimiter past the opening one.
+            $end_str_pos = strpos($content, $this->frontmatter_delimiter, $delimiter_len);
 
             if ($end_str_pos !== false) {
-                $offset = $end_str_pos + strlen($this->frontmatter_delimiter);
-                $content = substr($content, $offset); // until end of time
-                $content = Dj_App_String_Util::trim($content, '-'); // could there be more dashes than 3 --- ?
+                // Resume after the closing delimiter's whole LINE, so extra dashes (----) don't
+                // survive and a body that starts with a list keeps its bullet.
+                $line_end_pos = strpos($content, "\n", $end_str_pos);
+
+                if ($line_end_pos === false) {
+                    $content = '';
+                } else {
+                    $content = substr($content, $line_end_pos + 1);
+                }
+
+                $content = Dj_App_String_Util::trim($content);
             }
         }
 
@@ -166,13 +182,21 @@ class Djebel_App_Plugin_Markdown {
                 }
 
                 $file = $ctx['file'];
-                $res_obj = Dj_App_File_Util::readPartially($file, $buffer_size);
 
-                if ($res_obj->isError()) {
-                    throw new Dj_App_Exception('Error reading file', [ 'file' => $file ]);
+                // Kept in its OWN variable: assigning the file read to $res_obj replaced the
+                // result this method returns, so its success status came from the read rather
+                // than from the parse — and a parse failure could still report success.
+                $read_res = Dj_App_File_Util::readPartially($file, $buffer_size);
+
+                if ($read_res->isError()) {
+                    throw new Dj_App_Exception('Error reading file', [
+                        'code' => 'markdown.front_matter.read_failed',
+                        'file' => $file,
+                        'res_obj' => $read_res,
+                    ]);
                 }
 
-                $content = $res_obj->output;
+                $content = $read_res->output;
                 $content = Dj_App_String_Util::trim($content);
 
                 if (empty($content)) {
@@ -183,47 +207,72 @@ class Djebel_App_Plugin_Markdown {
             $res_obj->content = $content;
             $first_char = Dj_App_String_Util::getFirstChar($content);
 
-            // no header
-            if (empty($first_char) || $first_char != '-') {
-                throw new Dj_App_Exception('Missing header');
+            // A file may legitimately carry NO front matter — that is not an error. Its whole
+            // body is the content, meta stays empty, and the h1 title extraction below still
+            // runs, so such a file behaves like every other one. A block that OPENS but never
+            // closes is the one hard failure: see the throw below for why it is not repaired.
+            $meta = [];
+            $remaining_content = $content;
+            $frontmatter_text = '';
+
+            // Front matter must OPEN with the delimiter at offset 0. Testing only for a
+            // leading '-' matched a list bullet, and the scan below then treated the next
+            // --- (a horizontal rule) as the closing delimiter — silently swallowing every
+            // line before it as if it were metadata.
+            $has_front_matter = $first_char == '-' && strpos($content, $this->frontmatter_delimiter) === 0;
+
+            if ($has_front_matter) {
+                $delimiter_len = strlen($this->frontmatter_delimiter);
+                $small_content = Dj_App_String_Util::cut($content, $buffer_size);
+
+                // Search for the CLOSING delimiter PAST the opening one, on the untouched
+                // string. Trimming '-' off the front first also stripped whitespace, so an
+                // empty "---\n---" block lost BOTH delimiters and looked unterminated.
+                $closing_delimiter_pos = strpos($small_content, $this->frontmatter_delimiter, $delimiter_len);
+
+                // Opened but never closed is an authoring error, not content. It is NOT
+                // repaired: every heuristic (stop at the first blank line, consume lines that
+                // look like key: value) silently eats the opening lines of a document that
+                // legitimately starts with a horizontal rule followed by "Note: ...". Failing
+                // loudly beats mis-parsing quietly.
+                if ($closing_delimiter_pos === false) {
+                    throw new Dj_App_Exception('Front matter opened with --- but never closed', [
+                        'code' => 'markdown.front_matter.unclosed',
+                        'file' => empty($ctx['file']) ? '' : $ctx['file'],
+                    ]);
+                }
+
+                // Extract frontmatter text: everything between the two delimiters.
+                $frontmatter_len = $closing_delimiter_pos - $delimiter_len;
+                $frontmatter_text = substr($small_content, $delimiter_len, $frontmatter_len);
+                $frontmatter_text = Dj_App_String_Util::trim($frontmatter_text);
+
+                // skip header
+                if ($read_full_content) {
+                    // Resume after the closing delimiter's whole LINE, so extra dashes (----)
+                    // don't survive and a body starting with a list keeps its bullet.
+                    $line_end_pos = strpos($content, "\n", $closing_delimiter_pos);
+
+                    if ($line_end_pos === false) {
+                        $remaining_content = '';
+                    } else {
+                        $remaining_content = substr($content, $line_end_pos + 1);
+                    }
+
+                    $remaining_content = Dj_App_String_Util::trim($remaining_content);
+                    $res_obj->content = $remaining_content;
+                }
             }
 
-            $small_content = Dj_App_String_Util::cut($content, $buffer_size);
-            $small_content = Dj_App_String_Util::trim($small_content, '-');
+            if (!empty($frontmatter_text)) {
+                // Use existing utility to parse metadata
+                $meta_res = Dj_App_Util::extractMetaInfo($frontmatter_text);
 
-            // Find closing ---
-            $closing_delimiter_pos = strpos($small_content, $this->frontmatter_delimiter);
-
-            if ($closing_delimiter_pos === false) {
-                throw new Dj_App_Exception('Missing closing ---');
+                if ($meta_res->isSuccess()) {
+                    $meta = $meta_res->data();
+                    $meta = empty($meta) || !is_array($meta) ? [] : $meta;
+                }
             }
-
-            // Extract frontmatter text
-            $frontmatter_text = substr($small_content, 0, $closing_delimiter_pos);
-            $frontmatter_text = Dj_App_String_Util::trim($frontmatter_text, '-'); // in case there are more -
-
-            if (empty($frontmatter_text)) {
-                return $res_obj;
-            }
-
-            // skip header
-            if ($read_full_content) {
-                $content_trimmed = Dj_App_String_Util::trim($content, '-');
-                $offset = $closing_delimiter_pos + strlen($this->frontmatter_delimiter);
-                $remaining_content = substr($content_trimmed, $offset);
-                $remaining_content = Dj_App_String_Util::trim($remaining_content);
-                $res_obj->content = $remaining_content;
-            }
-
-            // Use existing utility to parse metadata
-            $meta_res = Dj_App_Util::extractMetaInfo($frontmatter_text);
-
-            if ($meta_res->isError()) {
-                return $res_obj;
-            }
-
-            $meta = $meta_res->data();
-            $meta = empty($meta) || !is_array($meta) ? [] : $meta;
 
             // Set defaults for common fields
             $defaults = [
@@ -249,27 +298,46 @@ class Djebel_App_Plugin_Markdown {
             // If content starts with # Title, extract it to meta and remove from content
             // This prevents duplication when rendering and ensures content title overrides frontmatter
             if ($read_full_content && !empty($remaining_content) && $remaining_content[0] === '#') {
-                // Performance: check first char before cutting/normalizing (early exit for 99% of files)
-                $search_buffer = Dj_App_String_Util::cut($remaining_content, 150);
-                $search_buffer = Dj_App_String_Util::normalizeNewLines($search_buffer);
+                // Exactly one # is an h1. Counted on the raw content BEFORE any copying or
+                // normalizing, so ## and deeper bail out having done no work at all.
+                $hash_count = strspn($remaining_content, '#');
 
-                // Find end of first line
-                $newline_pos = strpos($search_buffer, "\n");
-                $title_line = ($newline_pos !== false) ? substr($search_buffer, 0, $newline_pos) : $search_buffer;
-
-                // Check if h1 (single # only)
-                if (strspn($title_line, '#') === 1) {
-                    // Extract and set title (trim removes # and whitespace)
-                    $meta['title'] = Dj_App_String_Util::trim($title_line, '#');
-
-                    // Remove from content (normalize full content only when needed)
-                    $line_end = ($newline_pos !== false) ? $newline_pos + 1 : strlen($search_buffer);
+                if ($hash_count === 1) {
+                    // Normalize once, then find the end of the first line in the FULL content.
+                    // A fixed-size search window used to fall short of a long heading and cut
+                    // it mid-line, truncating the title and leaking its tail into the body.
                     $content_normalized = Dj_App_String_Util::normalizeNewLines($remaining_content);
-                    $remaining_content = substr($content_normalized, $line_end);
-                    $remaining_content = Dj_App_String_Util::trim($remaining_content);
-                    $res_obj->content = $remaining_content;
+                    $newline_pos = strpos($content_normalized, "\n");
 
-                    $ctx['title_extracted_from_content'] = true;
+                    if ($newline_pos === false) {
+                        $title_line = $content_normalized;
+                        $line_end = strlen($content_normalized);
+                    } else {
+                        // substr is safe here: $newline_pos came from strpos() on an ASCII
+                        // delimiter, so it always lands on a character boundary.
+                        $title_line = substr($content_normalized, 0, $newline_pos);
+                        $line_end = $newline_pos + 1;
+                    }
+
+                    // Drop the leading # only, by byte offset: it is ASCII and exactly one
+                    // char here, so the cut lands before any multi-byte text and leaves it
+                    // whole. Trimming '#' from BOTH ends ate the trailing character of a
+                    // title like "Learn C#".
+                    $title = substr($title_line, $hash_count);
+                    $title = Dj_App_String_Util::trim($title);
+
+                    // A bare '#' line carries no title. Leave whatever the front matter
+                    // declared instead of blanking it, and leave the line in the content.
+                    if (!empty($title)) {
+                        $meta['title'] = $title;
+
+                        // Remove the heading line from the content.
+                        $remaining_content = substr($content_normalized, $line_end);
+                        $remaining_content = Dj_App_String_Util::trim($remaining_content);
+                        $res_obj->content = $remaining_content;
+
+                        $ctx['title_extracted_from_content'] = true;
+                    }
                 }
 
                 $meta = Dj_App_Hooks::applyFilter('app.plugins.markdown.parse_front_matter_title', $meta, $ctx);
